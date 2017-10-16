@@ -12,4 +12,4 @@ $app = new Silex\Application();
 //-- Setup database access by redbeanphp
 //R::setup(HOST,USER,PASS);
 //to sqlite storage
- R::setup( 'sqlite:../api/src/dbfile.db' );
+ R::setup( 'sqlite:dbfile.db' );
