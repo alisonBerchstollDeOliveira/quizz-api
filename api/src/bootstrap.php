@@ -4,7 +4,7 @@
 require_once (BASE_DIR . '/vendor/silex.phar');
 
 //-- Importamos redbeanphp
-require_once (BASE_DIR . '/vendor/rb.php');
+require_once (BASE_DIR . '/vendor/rb.phar');
 
 //-- Crea una nueva aplicación silex
 $app = new Silex\Application();

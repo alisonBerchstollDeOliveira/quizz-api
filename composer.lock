@@ -573,7 +573,7 @@
                 "shasum": ""
             },
             "require": {
-                "php": "^5.5.9|>=7.0.8"
+                "php": "^5.5.9"
             },
             "conflict": {
                 "symfony/config": "<2.8",

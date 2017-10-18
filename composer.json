@@ -2,6 +2,6 @@
     "require": {
         "silex/silex": "~2.0",
          "ext-mbstring": "*",
-         "php":"^5.5.12"
+         "php":"^5.5.9"
     }
 }
