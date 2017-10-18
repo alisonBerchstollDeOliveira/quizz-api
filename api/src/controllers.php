@@ -60,7 +60,7 @@ $app->post('/preguntas', function(Request $request){
         $pregunta->ownOpcionList[] = $opcion;
     }
     R::store($pregunta);
-    
+    return new Response(json_encode($pregunta),201);
 });
 
 return $app;
