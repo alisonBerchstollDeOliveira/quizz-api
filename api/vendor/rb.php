@@ -199,8 +199,8 @@ class Debug extends RDefault implements Logger
 	 * Writes a query for logging with all bindings / params filled
 	 * in.
 	 *
-	 * @param string $newSql   the query
-	 * @param array  $bindings the bindings to process (key-value pairs)
+	 * @param string $newSql      the query
+	 * @param array  $newBindings the bindings to process (key-value pairs)
 	 *
 	 * @return string
 	 */
@@ -759,22 +759,23 @@ class RPDO implements Driver
 			$this->mysqlCollate = $charset . $collate;
 		}
 	}
-	
+
 	/**
 	 * Determine if a database supports a particular feature.
+	 *
+	 * @param $db_cap identifier of database capability
 	 *
 	 * @return int|false Whether the database feature is supported, false otherwise.
 	 **/
 	protected function hasCap( $db_cap )
 	{
 		$version = $this->pdo->getAttribute( \PDO::ATTR_SERVER_VERSION );
-		
 		switch ( strtolower( $db_cap ) ) {
 			case 'utf8mb4':
 				if ( version_compare( $version, '5.5.3', '<' ) ) {
 					return false;
 				}
-				
+
 				$client_version = $this->pdo->getAttribute(\PDO::ATTR_CLIENT_VERSION );
 				/*
 				 * libmysql has supported utf8mb4 since 5.5.3, same as the MySQL server.
@@ -791,7 +792,7 @@ class RPDO implements Driver
 				return version_compare( $version, '5.6', '>=' );
 			break;
 		}
-		
+
 		return false;
 	}
 
@@ -2973,6 +2974,7 @@ class OODBBean implements\IteratorAggregate,\ArrayAccess,\Countable,Jsonable
 				$this->__info['sys.shadow.'.$key] = $value;
 			}
 		}
+		$this->__info[ 'changelist' ] = array();
 		return $this;
 	}
 
@@ -3000,7 +3002,7 @@ class OODBBean implements\IteratorAggregate,\ArrayAccess,\Countable,Jsonable
 	 * example #1. After preparing the linking bean, the bean is returned thus
 	 * allowing the chained setter: ->song = $song.
 	 *
-	 * @param string|OODBBean $type          type of bean to dispense or the full bean
+	 * @param string|OODBBean $typeOrBean    type of bean to dispense or the full bean
 	 * @param string|array    $qualification JSON string or array (optional)
 	 *
 	 * @return OODBBean
@@ -3039,6 +3041,8 @@ class OODBBean implements\IteratorAggregate,\ArrayAccess,\Countable,Jsonable
 	 * This is as far as support for 1-1 goes in RedBeanPHP. This
 	 * method will only return a reference to the bean, changing it
 	 * and storing the bean will not update the related one-bean.
+	 *
+	 * @param  $type type of bean to load
 	 *
 	 * @return OODBBean
 	 */
@@ -4118,7 +4122,7 @@ interface QueryWriter
 	 *
 	 * @param string $type       source type
 	 * @param string $targetType target type (type to join)
-	 * @param string $leftRight  type of join (possible: 'LEFT', 'RIGHT' or 'INNER').
+	 * @param string $joinType   type of join (possible: 'LEFT', 'RIGHT' or 'INNER').
 	 *
 	 * @return string $joinSQLSnippet
 	 */
@@ -4268,7 +4272,7 @@ interface QueryWriter
 	 *
 	 * @param string $type       name of the table you want to query
 	 * @param array  $conditions criteria ( $column => array( $values ) )
-	 * @param string $addSQL     additional SQL snippet
+	 * @param string $addSql     additional SQL snippet
 	 * @param array  $bindings   bindings for SQL snippet
 	 *
 	 * @return array
@@ -4380,7 +4384,7 @@ interface QueryWriter
 	 *
 	 * @param string $type       name of the table you want to query
 	 * @param array  $conditions criteria ( $column => array( $values ) )
-	 * @param string $sql        additional SQL
+	 * @param string $addSql     additional SQL
 	 * @param array  $bindings   bindings
 	 *
 	 * @return void
@@ -5411,9 +5415,16 @@ abstract class AQueryWriter
 	}
 
 	/**
-	 * Sets a select-snippet.
+	 * Sets an SQL snippet to be used for the next queryRecord() operation.
+	 * A select snippet will be inserted at the end of the SQL select statement and
+	 * can be used to modify SQL-select commands to enable locking, for instance
+	 * using the 'FOR UPDATE' snippet (this will generate an SQL query like:
+	 * 'SELECT * FROM ... FOR UPDATE'. After the query has been executed the
+	 * SQL snippet will be erased. Note that only the first upcoming direct or
+	 * indirect invocation of queryRecord() through batch(), find() or load()
+	 * will be affected. The SQL snippet will be cached.
 	 *
-	 * @param string $sql sql
+	 * @param string $sql SQL snippet to use in SELECT statement.
 	 *
 	 * return self
 	 */
@@ -5431,7 +5442,7 @@ abstract class AQueryWriter
 
 		$key = NULL;
 		if ( $this->flagUseCache ) {
-			$key = $this->getCacheKey( array( $conditions, $addSql, $bindings, 'select' ) );
+			$key = $this->getCacheKey( array( $conditions, "$addSql {$this->sqlSelectSnippet}", $bindings, 'select' ) );
 
 			if ( $cached = $this->getCached( $type, $key ) ) {
 				return $cached;
@@ -7180,7 +7191,7 @@ abstract class Repository
 	 * for some types.
 	 * This method will return the previous value.
 	 *
-	 * @param boolean|array $list List of type names or 'all'
+	 * @param boolean|array $yesNoBeans List of type names or 'all'
 	 *
 	 * @return mixed
 	 */
@@ -7301,7 +7312,6 @@ abstract class Repository
 	 * checks if there have been any modification to this bean, in that case
 	 * the bean is stored once again, otherwise the bean will be left untouched.
 	 *
-	 * @param OODBBean $bean       bean tor process
 	 * @param array    $ownresidue list to process
 	 *
 	 * @return void
@@ -7420,9 +7430,10 @@ abstract class Repository
 	}
 
 	/**
-	 * Constructor, requires a query writer.
+	 * Constructor, requires a query writer and OODB.
 	 * Creates a new instance of the bean respository class.
 	 *
+	 * @param OODB        $oodb   instance of object database
 	 * @param QueryWriter $writer the Query Writer to use for this repository
 	 *
 	 * @return void
@@ -7494,7 +7505,7 @@ abstract class Repository
 	 *
 	 * @param string $type       type of beans you are looking for
 	 * @param array  $conditions list of conditions
-	 * @param string $addSQL     SQL to be used in query
+	 * @param string $sql        SQL to be used in query
 	 * @param array  $bindings   whether you prefer to use a WHERE clause or not (TRUE = not)
 	 *
 	 * @return array
@@ -8598,7 +8609,7 @@ class OODB extends Observable
 	 *
 	 * @param string $type       type of beans you are looking for
 	 * @param array  $conditions list of conditions
-	 * @param string $addSQL     SQL to be used in query
+	 * @param string $sql        SQL to be used in query
 	 * @param array  $bindings   a list of values to bind to query parameters
 	 *
 	 * @return array
@@ -8612,7 +8623,7 @@ class OODB extends Observable
 	 * Same as find() but returns a BeanCollection.
 	 *
 	 * @param string $type     type of beans you are looking for
-	 * @param string $addSQL   SQL to be used in query
+	 * @param string $sql      SQL to be used in query
 	 * @param array  $bindings a list of values to bind to query parameters
 	 *
 	 * @return array
@@ -8794,7 +8805,7 @@ class OODB extends Observable
 	 * A simple setter function to set the association manager to be used for storage and
 	 * more.
 	 *
-	 * @param AssociationManager $assoc sets the association manager to be used
+	 * @param AssociationManager $assocManager sets the association manager to be used
 	 *
 	 * @return void
 	 */
@@ -9262,7 +9273,7 @@ class Finder
 	 * @note instead of an SQL query you can pass a result array as well.
 	 *
 	 * @param string|array $types         a list of types (either array or comma separated string)
-	 * @param string|array $sqlOrArr      an SQL query or an array of prefetched records
+	 * @param string|array $sql           an SQL query or an array of prefetched records
 	 * @param array        $bindings      optional, bindings for SQL query
 	 * @param array        $remappings    optional, an array of remapping arrays
 	 * @param string       $queryTemplate optional, query template
@@ -10322,6 +10333,8 @@ class TagManager
 	 *
 	 * @param string       $beanType type of bean you are looking for
 	 * @param array|string $tagList  list of tags to match
+	 * @param string       $sql      additional sql snippet
+	 * @param array        $bindings bindings
 	 *
 	 * @return array
 	 */
@@ -10993,7 +11006,7 @@ class Facade
 	 * Let's call this chilly mode, it's just like fluid mode except that
 	 * certain types (i.e. tables) aren't touched.
 	 *
-	 * @param boolean|array $trueFalse
+	 * @param boolean|array $tf mode of operation (TRUE means frozen)
 	 */
 	public static function freeze( $tf = TRUE )
 	{
@@ -11050,7 +11063,7 @@ class Facade
 
 	/**
 	 * Same as load, but selects the bean for update, thus locking the bean.
-	 * @see Facade::load
+	 * This equals an SQL query like 'SELECT ... FROM ... FOR UPDATE'.
 	 *
 	 * @param string  $type    type of bean you want to load
 	 * @param integer $id      ID of the bean you want to load
@@ -11071,8 +11084,8 @@ class Facade
 	 * in the latter case this method will attempt to load the specified bean
 	 * and THEN trash it.
 	 *
-	 * @param string|OODBBean|SimpleModel $bean bean you want to remove from database
-	 * @param integer                     $id   ID if the bean to trash (optional, type-id variant only)
+	 * @param string|OODBBean|SimpleModel $beanOrType bean you want to remove from database
+	 * @param integer                     $id         ID if the bean to trash (optional, type-id variant only)
 	 *
 	 * @return void
 	 */
@@ -11087,7 +11100,7 @@ class Facade
 	 * the rest of the methods.
 	 *
 	 * @param string|array $typeOrBeanArray   type or bean array to import
-	 * @param integer      $number            number of beans to dispense
+	 * @param integer      $num               number of beans to dispense
 	 * @param boolean      $alwaysReturnArray if TRUE always returns the result as an array
 	 *
 	 * @return array|OODBBean
@@ -11182,9 +11195,8 @@ class Facade
 	}
 
 	/**
-	 * @see Facade::find
-	 *      The findAll() method differs from the find() method in that it does
-	 *      not assume a WHERE-clause, so this is valid:
+	 * The findAll() method differs from the find() method in that it does
+	 * not assume a WHERE-clause, so this is valid:
 	 *
 	 * R::findAll('person',' ORDER BY name DESC ');
 	 *
@@ -11202,12 +11214,17 @@ class Facade
 	}
 
 	/**
-	 * @see Facade::find
-	 * The variation also exports the beans (i.e. it returns arrays).
+	 * Like find() but also exports the beans as an array.
+	 * This method will perform a find-operation. For every bean
+	 * in the result collection this method will call the export() method.
+	 * This method returns an array containing the array representations
+	 * of every bean in the result set.
 	 *
-	 * @param string $type     the type of bean you are looking for
-	 * @param string $sql      SQL query to find the desired bean, starting right after WHERE clause
-	 * @param array  $bindings array of values to be bound to parameters in query
+	 * @see Finder::find
+	 *
+	 * @param string $type     type   the type of bean you are looking for
+	 * @param string $sql      sql    SQL query to find the desired bean, starting right after WHERE clause
+	 * @param array  $bindings values array of values to be bound to parameters in query
 	 *
 	 * @return array
 	 */
@@ -11217,8 +11234,7 @@ class Facade
 	}
 
 	/**
-	 * @see Facade::find
-	 * This variation returns the first bean only.
+	 * Like R::find() but returns the first bean only.
 	 *
 	 * @param string $type     the type of bean you are looking for
 	 * @param string $sql      SQL query to find the desired bean, starting right after WHERE clause
@@ -11232,12 +11248,15 @@ class Facade
 	}
 
 	/**
-	 * @see Facade::find
-	 * This variation returns the last bean only.
+	 * Like find() but returns the last bean of the result array.
+	 * Opposite of Finder::findLast().
+	 * If no beans are found, this method will return NULL.
+	 *
+	 * @see Finder::find
 	 *
 	 * @param string $type     the type of bean you are looking for
 	 * @param string $sql      SQL query to find the desired bean, starting right after WHERE clause
-	 * @param array  $bindings array of values to be bound to parameters in query
+	 * @param array  $bindings values array of values to be bound to parameters in query
 	 *
 	 * @return OODBBean
 	 */
@@ -11247,12 +11266,14 @@ class Facade
 	}
 
 	/**
-	 * Finds a bean collection.
-	 * Use this for large datasets.
+	 * Finds a BeanCollection using the repository.
+	 * A bean collection can be used to retrieve one bean at a time using
+	 * cursors - this is useful for processing large datasets. A bean collection
+	 * will not load all beans into memory all at once, just one at a time.
 	 *
-	 * @param string $type     the type of bean you are looking for
-	 * @param string $sql      SQL query to find the desired bean, starting right after WHERE clause
-	 * @param array  $bindings array of values to be bound to parameters in query
+	 * @param  string $type     the type of bean you are looking for
+	 * @param  string $sql      SQL query to find the desired bean, starting right after WHERE clause
+	 * @param  array  $bindings values array of values to be bound to parameters in query
 	 *
 	 * @return BeanCollection
 	 */
@@ -11262,16 +11283,70 @@ class Facade
 	}
 
 	/**
-	 * Finds multiple types of beans at once and offers additional
-	 * remapping functionality. This is a very powerful yet complex function.
-	 * For details see Finder::findMulti().
+	 * Returns a hashmap with bean arrays keyed by type using an SQL
+	 * query as its resource. Given an SQL query like 'SELECT movie.*, review.* FROM movie... JOIN review'
+	 * this method will return movie and review beans.
 	 *
-	 * @see Finder::findMulti()
+	 * Example:
 	 *
-	 * @param array|string $types      a list of bean types to find
-	 * @param string|array $sqlOrArr   SQL query string or result set array
-	 * @param array        $bindings   SQL bindings
-	 * @param array        $remappings an array of remapping arrays containing closures
+	 * <code>
+	 * $stuff = $finder->findMulti('movie,review', '
+	 *          SELECT movie.*, review.* FROM movie
+	 *          LEFT JOIN review ON review.movie_id = movie.id');
+	 * </code>
+	 *
+	 * After this operation, $stuff will contain an entry 'movie' containing all
+	 * movies and an entry named 'review' containing all reviews (all beans).
+	 * You can also pass bindings.
+	 *
+	 * If you want to re-map your beans, so you can use $movie->ownReviewList without
+	 * having RedBeanPHP executing an SQL query you can use the fourth parameter to
+	 * define a selection of remapping closures.
+	 *
+	 * The remapping argument (optional) should contain an array of arrays.
+	 * Each array in the remapping array should contain the following entries:
+	 *
+	 * <code>
+	 * array(
+	 * 	'a'       => TYPE A
+	 *    'b'       => TYPE B
+	 *    'matcher' => MATCHING FUNCTION ACCEPTING A, B and ALL BEANS
+	 *    'do'      => OPERATION FUNCTION ACCEPTING A, B, ALL BEANS, ALL REMAPPINGS
+	 * )
+	 * </code>
+	 *
+	 * Using this mechanism you can build your own 'preloader' with tiny function
+	 * snippets (and those can be re-used and shared online of course).
+	 *
+	 * Example:
+	 *
+	 * <code>
+	 * array(
+	 * 	'a'       => 'movie'     //define A as movie
+	 *    'b'       => 'review'    //define B as review
+	 *    'matcher' => function( $a, $b ) {
+	 *       return ( $b->movie_id == $a->id );  //Perform action if review.movie_id equals movie.id
+	 *    }
+	 *    'do'      => function( $a, $b ) {
+	 *       $a->noLoad()->ownReviewList[] = $b; //Add the review to the movie
+	 *       $a->clearHistory();                 //optional, act 'as if these beans have been loaded through ownReviewList'.
+	 *    }
+	 * )
+	 * </code>
+	 *
+	 * @note the SQL query provided IS NOT THE ONE used internally by this function,
+	 * this function will pre-process the query to get all the data required to find the beans.
+	 *
+	 * @note if you use the 'book.*' notation make SURE you're
+	 * selector starts with a SPACE. ' book.*' NOT ',book.*'. This is because
+	 * it's actually an SQL-like template SLOT, not real SQL.
+	 *
+	 * @note instead of an SQL query you can pass a result array as well.
+	 *
+	 * @param string|array $types         a list of types (either array or comma separated string)
+	 * @param string|array $sql           an SQL query or an array of prefetched records
+	 * @param array        $bindings      optional, bindings for SQL query
+	 * @param array        $remappings    optional, an array of remapping arrays
 	 *
 	 * @return array
 	 */
@@ -11300,8 +11375,6 @@ class Facade
 	}
 
 	/**
-	 * @see Facade::batch
-	 *
 	 * Alias for batch(). Batch method is older but since we added so-called *All
 	 * methods like storeAll, trashAll, dispenseAll and findAll it seemed logical to
 	 * improve the consistency of the Facade API and also add an alias for batch() called
@@ -11332,8 +11405,12 @@ class Facade
 	}
 
 	/**
-	 * Convenience function to execute Queries directly.
-	 * Executes SQL.
+	 * Convenience function to fire an SQL query using the RedBeanPHP
+	 * database adapter. This method allows you to directly query the
+	 * database without having to obtain an database adapter instance first.
+	 * Executes the specified SQL query together with the specified
+	 * parameter bindings and returns all rows
+	 * and all columns.
 	 *
 	 * @param string $sql      SQL query to execute
 	 * @param array  $bindings a list of values to be bound to query parameters
@@ -11346,8 +11423,11 @@ class Facade
 	}
 
 	/**
-	 * Convenience function to execute Queries directly.
-	 * Executes SQL.
+	 * Convenience function to fire an SQL query using the RedBeanPHP
+	 * database adapter. This method allows you to directly query the
+	 * database without having to obtain an database adapter instance first.
+	 * Executes the specified SQL query together with the specified
+	 * parameter bindings and returns a single cell.
 	 *
 	 * @param string $sql      SQL query to execute
 	 * @param array  $bindings a list of values to be bound to query parameters
@@ -11360,8 +11440,11 @@ class Facade
 	}
 
 	/**
-	 * Convenience function to execute Queries directly.
-	 * Executes SQL.
+	 * Convenience function to fire an SQL query using the RedBeanPHP
+	 * database adapter. This method allows you to directly query the
+	 * database without having to obtain an database adapter instance first.
+	 * Executes the specified SQL query together with the specified
+	 * parameter bindings and returns a single row.
 	 *
 	 * @param string $sql      SQL query to execute
 	 * @param array  $bindings a list of values to be bound to query parameters
@@ -11374,8 +11457,11 @@ class Facade
 	}
 
 	/**
-	 * Convenience function to execute Queries directly.
-	 * Executes SQL.
+	 * Convenience function to fire an SQL query using the RedBeanPHP
+	 * database adapter. This method allows you to directly query the
+	 * database without having to obtain an database adapter instance first.
+	 * Executes the specified SQL query together with the specified
+	 * parameter bindings and returns a single column.
 	 *
 	 * @param string $sql      SQL query to execute
 	 * @param array  $bindings a list of values to be bound to query parameters
@@ -11407,8 +11493,11 @@ class Facade
 	}
 
 	/**
-	 * Convenience function to execute Queries directly.
-	 * Executes SQL.
+	 *Convenience function to fire an SQL query using the RedBeanPHP
+	 * database adapter. This method allows you to directly query the
+	 * database without having to obtain an database adapter instance first.
+	 * Executes the specified SQL query together with the specified
+	 * parameter bindings and returns an associative array.
 	 * Results will be returned as an associative array indexed by the first
 	 * column in the select.
 	 *
@@ -11452,10 +11541,10 @@ class Facade
 	 * This function has a confusing method signature, the R::duplicate() function
 	 * only accepts two arguments: bean and filters.
 	 *
-	 * @param OODBBean $bean  bean to be copied
-	 * @param array    $trail for internal usage, pass array()
-	 * @param boolean  $pid   for internal usage
-	 * @param array    $white white list filter with bean types to duplicate
+	 * @param OODBBean $bean    bean to be copied
+	 * @param array    $trail   for internal usage, pass array()
+	 * @param boolean  $pid     for internal usage
+	 * @param array    $filters white list filter with bean types to duplicate
 	 *
 	 * @return array
 	 */
@@ -11564,8 +11653,15 @@ class Facade
 	 * $extra_count = $data['extra_count'];
 	 * </code>
 	 *
-	 * @param string $type type of beans to produce
-	 * @param array  $rows must contain an array of array
+	 * New in 4.3.2: meta mask. The meta mask is a special mask to send
+	 * data from raw result rows to the meta store of the bean. This is
+	 * useful for bundling additional information with custom queries.
+	 * Values of every column whos name starts with $mask will be
+	 * transferred to the meta section of the bean under key 'data.bundle'.
+	 *
+	 * @param string $type     type of beans to produce
+	 * @param array  $rows     must contain an array of array
+	 * @param string $metamask meta mask to apply (optional)
 	 *
 	 * @return array
 	 */
@@ -11576,10 +11672,10 @@ class Facade
 
 	/**
 	 * Just like converToBeans, but for one bean.
-	 * @see convertToBeans for more details.
 	 *
-	 * @param string $type type of beans to produce
-	 * @param array  $row  one row from the database
+	 * @param string $type      type of bean to produce
+	 * @param array  $row       one row from the database
+	 * @param string $metamask  metamask (see convertToBeans)
 	 *
 	 * @return array
 	 */
@@ -11808,6 +11904,7 @@ class Facade
 	 * Generates question mark slots for an array of values.
 	 *
 	 * @param array  $array array to generate question mark slots for
+	 * @param string $template template to use
 	 *
 	 * @return string
 	 */
@@ -11820,6 +11917,7 @@ class Facade
 	 * Flattens a multi dimensional bindings array for use with genSlots().
 	 *
 	 * @param array $array array to flatten
+	 * @param array $result result array parameter (for recursion)
 	 *
 	 * @return array
 	 */
@@ -12424,7 +12522,7 @@ class Facade
 	 * for some types.
 	 * This method will return the previous value.
 	 *
-	 * @param boolean|array $list List of type names or 'all'
+	 * @param boolean|array $yesNoBeans List of type names or 'all'
 	 *
 	 * @return mixed
 	 */
@@ -12435,12 +12533,29 @@ class Facade
 
 	/**
 	 * Exposes the result of the specified SQL query as a CSV file.
+	 * Usage:
+	 *
+	 * R::csv( 'SELECT
+	 *                 `name`,
+	 *                  population
+	 *          FROM city
+	 *          WHERE region = :region ',
+	 *          array( ':region' => 'Denmark' ),
+	 *          array( 'city', 'population' ),
+	 *          '/tmp/cities.csv'
+	 * );
+	 *
+	 * The command above will select all cities in Denmark
+	 * and create a CSV with columns 'city' and 'population' and
+	 * populate the cells under these column headers with the
+	 * names of the cities and the population numbers respectively.
 	 *
 	 * @param string  $sql      SQL query to expose result of
 	 * @param array   $bindings parameter bindings
 	 * @param array   $columns  column headers for CSV file
 	 * @param string  $path     path to save CSV file to
 	 * @param boolean $output   TRUE to output CSV directly using readfile
+	 * @param array   $options  delimiter, quote and escape character respectively
 	 *
 	 * @return void
 	 */
@@ -12451,8 +12566,22 @@ class Facade
 	}
 
 	/**
-	 * Productivity method to quickly find-and-update a bean.
-	 * @see RedBeanPHP\Util\MatchUp
+	 * MatchUp is a powerful productivity boosting method that can replace simple control
+	 * scripts with a single RedBeanPHP command. Typically, matchUp() is used to
+	 * replace login scripts, token generation scripts and password reset scripts.
+	 * The MatchUp method takes a bean type, an SQL query snippet (starting at the WHERE clause),
+	 * SQL bindings, a pair of task arrays and a bean reference.
+	 *
+	 * If the first 3 parameters match a bean, the first task list will be considered,
+	 * otherwise the second one will be considered. On consideration, each task list,
+	 * an array of keys and values will be executed. Every key in the task list should
+	 * correspond to a bean property while every value can either be an expression to
+	 * be evaluated or a closure (PHP 5.3+). After applying the task list to the bean
+	 * it will be stored. If no bean has been found, a new bean will be dispensed.
+	 *
+	 * This method will return TRUE if the bean was found and FALSE if not AND
+	 * there was a NOT-FOUND task list. If no bean was found AND there was also
+	 * no second task list, NULL will be returned.
 	 *
 	 * @param string   $type         type of bean you're looking for
 	 * @param string   $sql          SQL snippet (starting at the WHERE clause, omit WHERE-keyword)
@@ -12479,8 +12608,34 @@ class Facade
 	}
 
 	/**
-	 * Calculates a diff.
-	 * @see Diff::diff
+	 * Calculates a diff between two beans (or arrays of beans).
+	 * The result of this method is an array describing the differences of the second bean compared to
+	 * the first, where the first bean is taken as reference. The array is keyed by type/property, id and property name, where
+	 * type/property is either the type (in case of the root bean) or the property of the parent bean where the type resides.
+	 * The diffs are mainly intended for logging, you cannot apply these diffs as patches to other beans.
+	 * However this functionality might be added in the future.
+	 *
+	 * The keys of the array can be formatted using the $format parameter.
+	 * A key will be composed of a path (1st), id (2nd) and property (3rd).
+	 * Using printf-style notation you can determine the exact format of the key.
+	 * The default format will look like:
+	 *
+	 * 'book.1.title' => array( <OLDVALUE>, <NEWVALUE> )
+	 *
+	 * If you only want a simple diff of one bean and you don't care about ids,
+	 * you might pass a format like: '%1$s.%3$s' which gives:
+	 *
+	 * 'book.1.title' => array( <OLDVALUE>, <NEWVALUE> )
+	 *
+	 * The filter parameter can be used to set filters, it should be an array
+	 * of property names that have to be skipped. By default this array is filled with
+	 * two strings: 'created' and 'modified'.
+	 *
+	 * @param OODBBean|array $bean    reference beans
+	 * @param OODBBean|array $other   beans to compare
+	 * @param array          $filters names of properties of all beans to skip
+	 * @param string         $format  the format of the key, defaults to '%s.%s.%s'
+	 * @param string         $type    type/property of bean to use for key generation
 	 *
 	 * @return array
 	 */
@@ -12495,8 +12650,31 @@ class Facade
 	 * Beans will automatically JSONify any array that's not in a list property and
 	 * the Query Writer (if capable) will attempt to create a JSON column for strings that
 	 * appear to contain JSON.
-	 * @see AQueryWriter::useJSONColumns
-	 * @see OODBBean::convertArraysToJSON
+	 *
+	 * Feature #1:
+	 * AQueryWriter::useJSONColumns
+	 *
+	 * Toggles support for automatic generation of JSON columns.
+	 * Using JSON columns means that strings containing JSON will
+	 * cause the column to be created (not modified) as a JSON column.
+	 * However it might also trigger exceptions if this means the DB attempts to
+	 * convert a non-json column to a JSON column.
+	 *
+	 * Feature #2:
+	 * OODBBean::convertArraysToJSON
+	 *
+	 * Toggles array to JSON conversion. If set to TRUE any array
+	 * set to a bean property that's not a list will be turned into
+	 * a JSON string. Used together with AQueryWriter::useJSONColumns this
+	 * extends the data type support for JSON columns.
+	 *
+	 * So invoking this method is the same as:
+	 *
+	 * AQueryWriter::useJSONColumns( $flag );
+	 * OODBBean::convertArraysToJSON( $flag );
+	 *
+	 * Unlike the methods above, that return the previous state, this
+	 * method does not return anything (void).
 	 *
 	 * @param boolean $flag feature flag (either TRUE or FALSE)
 	 *
@@ -13057,7 +13235,8 @@ class ArrayTool
 	/**
 	 * Generates question mark slots for an array of values.
 	 *
-	 * @param array  $array array to generate question mark slots for
+	 * @param array  $array    array to generate question mark slots for
+	 * @param string $template template to use
 	 *
 	 * @return string
 	 */
@@ -13130,7 +13309,7 @@ class DispenseHelper
 	 *
 	 * @param OODB         $oodb              OODB
 	 * @param string|array $typeOrBeanArray   type or bean array to import
-	 * @param integer      $number            number of beans to dispense
+	 * @param integer      $num               number of beans to dispense
 	 * @param boolean	   $alwaysReturnArray if TRUE always returns the result as an array
 	 *
 	 * @return array|OODBBean
@@ -13457,9 +13636,9 @@ class QuickExport
 
 	/**
 	 * Constructor.
-	 * The Quick Export requires a Finder.
+	 * The Quick Export requires a toolbox.
 	 *
-	 * @param Finder $finder
+	 * @param ToolBox $toolbox
 	 */
 	public function __construct( ToolBox $toolbox )
 	{
@@ -13468,6 +13647,22 @@ class QuickExport
 
 	/**
 	 * Exposes the result of the specified SQL query as a CSV file.
+	 * Usage:
+	 *
+	 * R::csv( 'SELECT
+	 *                 `name`,
+	 *                  population
+	 *          FROM city
+	 *          WHERE region = :region ',
+	 *          array( ':region' => 'Denmark' ),
+	 *          array( 'city', 'population' ),
+	 *          '/tmp/cities.csv'
+	 * );
+	 *
+	 * The command above will select all cities in Denmark
+	 * and create a CSV with columns 'city' and 'population' and
+	 * populate the cells under these column headers with the
+	 * names of the cities and the population numbers respectively.
 	 *
 	 * @param string  $sql      SQL query to expose result of
 	 * @param array   $bindings parameter bindings
