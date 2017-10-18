@@ -1,6 +1,7 @@
 {
     "require": {
         "silex/silex": "~2.0",
-         "ext-mbstring": "*"
+         "ext-mbstring": "*",
+         "gabordemooij/redbean": "dev-master"
     }
 }
