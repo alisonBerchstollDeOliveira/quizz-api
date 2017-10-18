@@ -6046,17 +6046,7 @@ class MySQL extends AQueryWriter implements QueryWriter
 			}
 		}
 
-		if ( mb_strlen( $value, 'UTF-8' ) <= 191 ) {
-			return MySQL::C_DATATYPE_TEXT7;
-		}
-
-		if ( mb_strlen( $value, 'UTF-8' ) <= 255 ) {
-			return MySQL::C_DATATYPE_TEXT8;
-		}
-
-		if ( mb_strlen( $value, 'UTF-8' ) <= 65535 ) {
-			return MySQL::C_DATATYPE_TEXT16;
-		}
+		
 
 		return MySQL::C_DATATYPE_TEXT32;
 	}
